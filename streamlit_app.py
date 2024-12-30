@@ -1,56 +1,151 @@
 import streamlit as st
-from openai import OpenAI
+import requests
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+# Set your SerpApi API key
+serpapi_api_key = "5e354959e3e052785f1abf5752f3893e479f6faa09bcc3e9150298e502f222a5"  # Replace with your actual API key
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+# Define a list of platforms for easy categorization
+PLATFORMS = {
+    'coursera': 'coursera.org',
+    'udemy': 'udemy.com',
+    'youtube': 'youtube.com',
+    'edx': 'edx.org',
+    'freecodecamp': 'freecodecamp.org',
+    'futurelearn': 'futurelearn.com'
+}
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+# Function to generate roadmap and resources using SerpApi
+def generate_roadmap_and_resources(field_of_interest):
+    query = f"top courses to learn {field_of_interest} from scratch"
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # Define SerpApi endpoint and parameters
+    url = "https://serpapi.com/search"
+    params = {
+        "q": query,
+        "api_key": serpapi_api_key,  # Your actual SerpApi API key
+    }
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+    # Make the request to SerpApi
+    response = requests.get(url, params=params)
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+    # Initialize lists to store courses by type
+    free_courses = []
+    certification_courses = []
+    paid_courses = []
+    certification_exams = []
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
+    # Check if the response is successful
+    if response.status_code == 200:
+        # Get the response data in JSON format
+        response_json = response.json()
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        # Check if 'organic_results' is in the response
+        if 'organic_results' in response_json:
+            st.write("### Course Categories Based on Your Interest:")
+
+            # Iterate through the organic search results and categorize them
+            for result in response_json['organic_results']:
+                course_title = result.get('title', 'No title available')
+                course_link = result.get('link', '#')
+                description = result.get('snippet', 'No description available')
+                reviews = result.get('reviews', None)
+                rating = result.get('rating', None)
+
+                # Identify platform and categorize courses based on keywords
+                platform = None
+                for key, value in PLATFORMS.items():
+                    if value in course_link.lower():
+                        platform = key
+                        break
+
+                # If platform found, categorize
+                if platform:
+                    # Classify courses into free, certification, or paid
+                    if 'free' in course_title.lower() or 'free' in description.lower():
+                        free_courses.append((course_title, course_link, description, platform, rating, reviews))
+                    elif 'certification' in course_title.lower() or 'certification' in description.lower():
+                        certification_courses.append(
+                            (course_title, course_link, description, platform, rating, reviews))
+                        certification_exams.append((course_title, course_link))  # Separate list for certification exams
+                    elif 'paid' in course_title.lower() or 'paid' in description.lower():
+                        paid_courses.append((course_title, course_link, description, platform, rating, reviews))
+                    else:
+                        # Default to paid if nothing specific is found
+                        paid_courses.append((course_title, course_link, description, platform, rating, reviews))
+
+            # Sort courses by rating in descending order
+            free_courses.sort(key=lambda x: x[4] if x[4] else 0, reverse=True)
+            certification_courses.sort(key=lambda x: x[4] if x[4] else 0, reverse=True)
+            paid_courses.sort(key=lambda x: x[4] if x[4] else 0, reverse=True)
+
+            # Display sorted free courses
+            if free_courses:
+                st.write("### Top Free Courses")
+                for course in free_courses:
+                    with st.expander(course[0]):
+                        st.markdown(f"**Platform**: {course[3].title()} - **Description**: {course[2]}")
+                        st.markdown(f"**Rating**: {course[4] if course[4] else 'No rating available'}")
+                        st.markdown(f"[Go to Course]({course[1]})")
+
+            # Display sorted certification courses
+            if certification_courses:
+                st.write("### Top Certification Courses")
+                for course in certification_courses:
+                    with st.expander(course[0]):
+                        st.markdown(f"**Platform**: {course[3].title()} - **Description**: {course[2]}")
+                        st.markdown(f"**Rating**: {course[4] if course[4] else 'No rating available'}")
+                        st.markdown(f"[Go to Course]({course[1]})")
+
+            # Display sorted paid courses
+            if paid_courses:
+                st.write("### Top Paid Courses")
+                for course in paid_courses:
+                    with st.expander(course[0]):
+                        st.markdown(f"**Platform**: {course[3].title()} - **Description**: {course[2]}")
+                        st.markdown(f"**Rating**: {course[4] if course[4] else 'No rating available'}")
+                        st.markdown(f"[Go to Course]({course[1]})")
+
+            # Display Certification Exams
+            if certification_exams:
+                st.write("### Certification Exams")
+                for exam in certification_exams:
+                    with st.expander(exam[0]):
+                        st.markdown(f"[Go to Certification Exam]({exam[1]})")
+
+        else:
+            st.write("No courses found. Please try another field or adjust your search.")
+    else:
+        st.error(f"Error fetching data from SerpApi: {response.status_code}")
+
+
+# Function to get the survey responses
+def get_survey_responses():
+    # Ask for the field of interest (e.g., Data Science, Cyber Security, etc.)
+    field_of_interest = st.text_input("Enter your field of interest (e.g., Data Science, Cyber Security, AI)")
+
+    return field_of_interest
+
+
+# Function to process survey responses and generate recommendations
+def process_survey_responses(field_of_interest):
+    if field_of_interest:
+        st.write(f"Processing roadmap for field: {field_of_interest}")
+        generate_roadmap_and_resources(field_of_interest)  # This will display the courses for the selected field
+
+
+# Main function to run the app
+def main():
+    st.title("Career Roadmap Generator")
+
+    # Get the survey responses and field of interest from the user
+    field_of_interest = get_survey_responses()
+
+    if field_of_interest:
+        # Process the responses and generate recommendations and resources
+        process_survey_responses(field_of_interest)
+
+
+# Run the main function to start the Streamlit app
+if __name__ == "__main__":
+    main()
